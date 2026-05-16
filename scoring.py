@@ -114,7 +114,7 @@ def score_condition(car: CarListing, req: SearchRequest) -> float:
     # Title status adjustment
     title_scores = {
         "clean": 30,
-        "Clear": 30,
+        "Clean": 30,
         "rebuilt": 10,
         "Rebuilt": 10,
         "salvage": -30,
