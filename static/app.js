@@ -14,19 +14,33 @@ const submitBtn    = $('submit-btn');
 const progressList = $('progress-list');
 const loadingTitle = $('loading-title');
 const carCards     = $('car-cards');
+const carTypeGrid  = $('car-type-grid');
+const carTypeInput = $('car-type');
 
 /* ─── Section helpers ───────────────────────────────────────────────────── */
 function showOnly(active) {
   [formSection, loadingSection, resultsSection, errorSection].forEach(s => {
     s.classList.toggle('hidden', s !== active);
   });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+/* ─── Car Type Visual Selector ─────────────────────────────────────────── */
+carTypeGrid.addEventListener('click', e => {
+  const btn = e.target.closest('.car-type-btn');
+  if (!btn) return;
+
+  // Deselect all, select clicked
+  carTypeGrid.querySelectorAll('.car-type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  carTypeInput.value = btn.dataset.value;
+});
 
 /* ─── Form submit ───────────────────────────────────────────────────────── */
 form.addEventListener('submit', async e => {
   e.preventDefault();
 
-  const carType    = $('car-type').value;
+  const carType    = carTypeInput.value;
   const condition  = $('condition').value || null;
   const budgetMin  = parseInt($('budget-min').value);
   const budgetMax  = parseInt($('budget-max').value);
@@ -34,11 +48,15 @@ form.addEventListener('submit', async e => {
   const yearMax    = $('year-max').value ? parseInt($('year-max').value) : null;
   const mileageMax = $('mileage-max').value ? parseInt($('mileage-max').value) : null;
 
-  // Collect checked features
-  const mustHaveFeatures = [...document.querySelectorAll('.feature-checkbox input:checked')]
+  const mustHaveFeatures = [...document.querySelectorAll('.feature-chip input:checked')]
     .map(cb => cb.value);
 
-  if (!carType || isNaN(budgetMin) || isNaN(budgetMax)) return;
+  if (!carType) {
+    carTypeGrid.style.outline = '2px solid var(--red)';
+    setTimeout(() => carTypeGrid.style.outline = '', 2000);
+    return;
+  }
+  if (isNaN(budgetMin) || isNaN(budgetMax)) return;
 
   submitBtn.disabled = true;
   submitBtn.querySelector('.btn-text').textContent = 'Searching...';
@@ -67,7 +85,6 @@ form.addEventListener('submit', async e => {
     const { job_id } = await res.json();
     currentJobId = job_id;
 
-    // Show progress immediately
     renderProgressList([
       { step: 'scraping_carmax', status: 'pending' },
       { step: 'scraping_carvana', status: 'pending' },
@@ -81,7 +98,7 @@ form.addEventListener('submit', async e => {
     showError(err.message);
   } finally {
     submitBtn.disabled = false;
-    submitBtn.querySelector('.btn-text').textContent = 'Find My Car';
+    submitBtn.querySelector('.btn-text').textContent = 'Search Cars';
   }
 });
 
@@ -96,11 +113,9 @@ async function pollJob(jobId) {
   try {
     const res = await fetch(`/search/${jobId}`);
     if (!res.ok) throw new Error(`Poll failed: HTTP ${res.status}`);
-
     const data = await res.json();
 
     if (loadingTitle) loadingTitle.textContent = data.progress || 'Searching...';
-
     if (data.progress_detail && Object.keys(data.progress_detail).length > 0) {
       renderProgressList(Object.values(data.progress_detail));
     }
@@ -112,7 +127,6 @@ async function pollJob(jobId) {
       clearInterval(pollingTimer);
       showError(data.error || 'Search failed with an unknown error.');
     }
-
   } catch (err) {
     clearInterval(pollingTimer);
     showError('Network error: ' + err.message);
@@ -124,16 +138,16 @@ const STEP_LABELS = {
   scraping_carmax: 'Scanning CarMax',
   scraping_carvana: 'Scanning Carvana',
   scoring: 'Scoring & Ranking',
-  generating_summaries: 'Generating AI Summaries',
+  generating_summaries: 'AI Summaries',
 };
 
 function renderProgressList(items) {
   progressList.innerHTML = items.map(item => {
     const statusLabel = {
-      pending:     'Waiting...',
-      running:     'In Progress...',
-      done:        'Done',
-      failed:      'Failed',
+      pending: 'Waiting',
+      running: 'Working',
+      done: 'Done',
+      failed: 'Failed',
     }[item.status] || item.status;
 
     const stepLabel = STEP_LABELS[item.step] || item.step;
@@ -154,9 +168,8 @@ function renderResults(result) {
 
   const params = result.search_params;
   $('result-meta').textContent =
-    `${result.total_found} cars found · Generated ${formatDate(result.generated_at)}`;
+    `${result.total_found} cars found · ${formatDate(result.generated_at)}`;
 
-  // Search params summary
   const paramsSummary = $('search-params-summary');
   const tags = [
     params.car_type,
@@ -169,7 +182,7 @@ function renderResults(result) {
   paramsSummary.innerHTML = tags.map(t => `<span class="param-tag">${esc(t)}</span>`).join('');
   paramsSummary.classList.remove('hidden');
 
-  carCards.innerHTML = result.cars.map(renderCarCard).join('');
+  carCards.innerHTML = result.cars.map((car, i) => renderCarCard(car, i)).join('');
   showOnly(resultsSection);
 }
 
@@ -179,85 +192,114 @@ function renderCarCard(scoredCar, index) {
   const composite = scores.composite;
 
   // Score color
-  let scoreClass = 'score-low';
-  if (composite >= 80) scoreClass = 'score-high';
-  else if (composite >= 60) scoreClass = 'score-mid';
+  let scoreColor = 'var(--red)';
+  if (composite >= 80) scoreColor = 'var(--green)';
+  else if (composite >= 60) scoreColor = 'var(--yellow)';
 
-  // Source tag
+  // Source class
   const sourceClass = car.source.toLowerCase() === 'carmax' ? 'source-carmax' : 'source-carvana';
 
-  // Score breakdown bars
+  // Rank badge (top 3)
+  let rankHtml = '';
+  if (index < 3) {
+    rankHtml = `<div class="rank-badge rank-${index + 1}">${index + 1}</div>`;
+  }
+
+  // Score ring SVG
+  const circumference = 2 * Math.PI * 22; // radius = 22
+  const offset = circumference - (composite / 100) * circumference;
+  const ringHtml = `
+    <div class="score-ring">
+      <svg viewBox="0 0 56 56">
+        <circle class="score-ring-bg" cx="28" cy="28" r="22" />
+        <circle class="score-ring-fill" cx="28" cy="28" r="22"
+          stroke="${scoreColor}"
+          stroke-dasharray="${circumference}"
+          stroke-dashoffset="${offset}" />
+      </svg>
+      <div class="score-ring-text" style="color:${scoreColor}">${Math.round(composite)}</div>
+    </div>
+  `;
+
+  // Mini breakdown chips
   const breakdownItems = [
-    { label: 'Price Value', value: scores.price_value },
+    { label: 'Price', value: scores.price_value },
     { label: 'Year', value: scores.year_depreciation },
-    { label: 'Mileage', value: scores.mileage },
-    { label: 'Condition', value: scores.condition },
-    { label: 'Features', value: scores.feature_match },
-    { label: 'Source Trust', value: scores.source_trust },
+    { label: 'Miles', value: scores.mileage },
+    { label: 'Cond', value: scores.condition },
+    { label: 'Feat', value: scores.feature_match },
   ];
 
-  const breakdownHtml = breakdownItems.map(item => `
-    <div class="breakdown-row">
-      <span class="breakdown-label">${esc(item.label)}</span>
-      <div class="breakdown-bar-bg">
-        <div class="breakdown-bar" style="width: ${item.value}%"></div>
+  const breakdownHtml = breakdownItems.map(item => {
+    let barColor = 'var(--accent)';
+    if (item.value >= 80) barColor = 'var(--green)';
+    else if (item.value >= 60) barColor = 'var(--yellow)';
+    else barColor = 'var(--red)';
+
+    return `
+      <div class="breakdown-chip">
+        <div class="breakdown-chip-bar">
+          <div class="breakdown-chip-fill" style="width:${item.value}%;background:${barColor}"></div>
+        </div>
+        <span class="breakdown-chip-label">${esc(item.label)}</span>
+        <span class="breakdown-chip-value" style="color:${barColor}">${item.value}</span>
       </div>
-      <span class="breakdown-value">${item.value}</span>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   // Feature tags
-  const featureHtml = (car.features || []).slice(0, 6).map(f =>
+  const featureHtml = (car.features || []).slice(0, 8).map(f =>
     `<span class="feature-tag">${esc(f)}</span>`
   ).join('');
 
   return `
     <article class="car-card">
-      <div class="car-header">
-        <div class="car-header-left">
-          ${car.image_url ? `<img class="car-image" src="${esc(car.image_url)}" alt="${esc(car.title)}" onerror="this.style.display='none'" />` : ''}
-          <div class="car-title-block">
+      <div class="car-card-top">
+        <div class="car-img-wrap">
+          ${car.image_url ? `<img src="${esc(car.image_url)}" alt="${esc(car.title)}" onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:0.8rem\\'>No Image</div>'" />` : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:0.8rem">No Image</div>'}
+          ${rankHtml}
+        </div>
+        <div class="car-info">
+          <div class="car-title-row">
             <h3 class="car-title">${esc(car.title)}</h3>
-            <div class="car-tags">
-              <span class="source-tag ${sourceClass}">${esc(car.source)}</span>
-              ${car.year ? `<span class="info-tag">${car.year}</span>` : ''}
-              ${car.mileage != null ? `<span class="info-tag">${car.mileage.toLocaleString()} mi</span>` : ''}
-              ${car.condition ? `<span class="info-tag">${esc(car.condition)}</span>` : ''}
-            </div>
+            <div class="car-price">$${car.price.toLocaleString()}</div>
+          </div>
+          <div class="car-meta">
+            <span class="source-pill ${sourceClass}">${esc(car.source)}</span>
+            ${car.year ? `<span class="meta-chip">${car.year}</span>` : ''}
+            ${car.mileage != null ? `<span class="meta-chip">${car.mileage.toLocaleString()} mi</span>` : ''}
+            ${car.condition ? `<span class="meta-chip">${esc(car.condition)}</span>` : ''}
           </div>
         </div>
-        <div class="car-header-right">
-          <div class="car-price">$${car.price.toLocaleString()}</div>
-          <div class="score-badge ${scoreClass}">
-            <span class="score-value">${composite}</span>
-            <span class="score-label">/ 100</span>
-          </div>
+      </div>
+
+      <div class="score-ring-wrap">
+        ${ringHtml}
+        <div>
+          <div class="score-ring-label">Match Score</div>
+        </div>
+        <div class="score-breakdown-mini">
+          ${breakdownHtml}
         </div>
       </div>
 
       <div class="car-body">
         ${scoredCar.summary ? `
         <div class="car-section">
-          <p class="section-label">AI Summary</p>
           <p class="ai-summary">${esc(scoredCar.summary)}</p>
         </div>` : ''}
 
-        <div class="car-section">
-          <p class="section-label">Score Breakdown</p>
-          <div class="breakdown">
-            ${breakdownHtml}
-          </div>
-        </div>
-
         ${featureHtml ? `
         <div class="car-section">
-          <p class="section-label">Features</p>
           <div class="feature-tags">${featureHtml}</div>
         </div>` : ''}
 
-        <a href="${esc(car.url)}" target="_blank" rel="noopener" class="btn btn-outline">
-          View on ${esc(car.source)} →
-        </a>
+        <div class="car-actions">
+          <a href="${esc(car.url)}" target="_blank" rel="noopener" class="btn-view">
+            View on ${esc(car.source)}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+          </a>
+        </div>
       </div>
     </article>
   `;
@@ -274,6 +316,8 @@ function resetApp() {
   if (pollingTimer) clearInterval(pollingTimer);
   currentJobId = null;
   form.reset();
+  carTypeInput.value = '';
+  carTypeGrid.querySelectorAll('.car-type-btn').forEach(b => b.classList.remove('active'));
   showOnly(formSection);
 }
 
