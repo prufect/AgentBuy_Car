@@ -38,6 +38,7 @@ AutoBrief/
 ```
 
 ## Setup
+> Note: Use Python 3.12 or later before installing dependencies.
 
 **1. Clone and install dependencies**
 
