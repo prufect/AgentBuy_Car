@@ -217,7 +217,15 @@ async def mock_search(req: SearchRequest):
 async def debug_scrape(url: str = "https://www.carvana.com/cars/suv?priceMin=20000&priceMax=35000"):
     """Scrape a URL and return debug info about what was found."""
     import os
-    from scraper import _fetch_via_brightdata, get_scrape_debug_info, _extract_json_vehicles, _parse_carmax_listings, _parse_carvana_listings
+    from scraper import (
+        _fetch_via_brightdata,
+        get_scrape_debug_info,
+        _extract_json_vehicles,
+        _parse_carmax_listings,
+        _parse_carvana_listings,
+        _parse_craigslist_listings,
+        CRAIGSLIST_SITE,
+    )
 
     api_key = os.getenv("BRIGHTDATA_API_KEY", "")
     if not api_key:
@@ -237,6 +245,8 @@ async def debug_scrape(url: str = "https://www.carvana.com/cars/suv?priceMin=200
     # Try DOM parsing
     if "carmax" in url.lower():
         parsed = _parse_carmax_listings(html)
+    elif "craigslist" in url.lower():
+        parsed = _parse_craigslist_listings(html, CRAIGSLIST_SITE, "SUV")
     else:
         parsed = _parse_carvana_listings(html)
     debug["dom_listings_found"] = len(parsed)

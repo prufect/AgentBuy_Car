@@ -31,6 +31,7 @@ const initialSearchQuery =
 const defaultProgress = [
   { step: "scraping_carmax", status: "pending" },
   { step: "scraping_carvana", status: "pending" },
+  { step: "scraping_craigslist", status: "pending" },
   { step: "scoring", status: "pending" },
   { step: "generating_summaries", status: "pending" },
 ];
@@ -38,6 +39,7 @@ const defaultProgress = [
 const stepLabels = {
   scraping_carmax: "Scanning CarMax",
   scraping_carvana: "Scanning Carvana",
+  scraping_craigslist: "Scanning Craigslist",
   scoring: "Scoring fit and value",
   generating_summaries: "Writing advisor notes",
 };
@@ -568,7 +570,7 @@ function Stat({ value, label }) {
 }
 
 function BrandMarquee() {
-  const sources = ["CarMax", "Carvana", "Budget fit", "Low mileage", "Clean title", "Feature match", "Trust score", "AI summary"];
+  const sources = ["CarMax", "Carvana", "Craigslist", "Budget fit", "Low mileage", "Clean title", "Feature match", "Trust score", "AI summary"];
 
   return h(
     "section",
@@ -847,7 +849,7 @@ function ErrorState({ error, onReset, onDemo }) {
 
 function FeatureSection() {
   const workflow = [
-    { icon: Search, title: "Market scan", text: "CarMax and Carvana listings are pulled into one normalized comparison set." },
+    { icon: Search, title: "Market scan", text: "CarMax, Carvana, and Craigslist listings are pulled into one normalized comparison set." },
     { icon: TimerReset, title: "Fit scoring", text: "Budget, year, mileage, condition, features, and source trust become a single score." },
     { icon: Trophy, title: "Ranked shortlist", text: "The strongest matches surface with readable summaries and transparent score bars." },
   ];

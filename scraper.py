@@ -1,7 +1,7 @@
 """
-AutoBrief Scraper — Bright Data Web Unlocker for CarMax & Carvana.
+AutoBrief Scraper — Bright Data Web Unlocker for CarMax, Carvana & Craigslist.
 
-Scrapes car listings from both sites, parses HTML with BeautifulSoup,
+Scrapes car listings from all three sources, parses HTML with BeautifulSoup,
 and returns normalized CarListing objects.
 
 Strategy:
@@ -11,10 +11,11 @@ Strategy:
 """
 
 import json
+import os
 import re
 import logging
 from typing import Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -24,6 +25,19 @@ from models import CarListing
 logger = logging.getLogger(__name__)
 
 BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
+CRAIGSLIST_SITE = os.getenv("CRAIGSLIST_SITE", "sfbay").strip().lower() or "sfbay"
+
+# Craigslist auto_bodytype values for /search/cta (cars & trucks).
+CRAIGSLIST_BODY_TYPE = {
+    "suv": "9",
+    "sedan": "8",
+    "truck": "7",
+    "coupe": "3",
+    "hatchback": "4",
+    "van": "5",
+    "wagon": "12",
+    "convertible": "2",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +198,134 @@ def _carvana_search_url(car_type: str, budget_min: int, budget_max: int,
     if mileage_max:
         params.append(f"milesMax={mileage_max}")
     return f"{path}?{'&'.join(params)}"
+
+
+def _craigslist_base_url(site: str) -> str:
+    return f"https://{site}.craigslist.org"
+
+
+def _craigslist_search_url(
+    car_type: str,
+    budget_min: int,
+    budget_max: int,
+    site: str = CRAIGSLIST_SITE,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    mileage_max: Optional[int] = None,
+) -> str:
+    """Build a Craigslist cars & trucks search URL for a regional site."""
+    params = [f"min_price={budget_min}", f"max_price={budget_max}"]
+    body_code = CRAIGSLIST_BODY_TYPE.get(car_type.lower())
+    if body_code:
+        params.append(f"auto_bodytype={body_code}")
+    if year_min:
+        params.append(f"min_auto_year={year_min}")
+    if year_max:
+        params.append(f"max_auto_year={year_max}")
+    if mileage_max:
+        params.append(f"max_auto_miles={mileage_max}")
+    query = "&".join(params)
+    return f"{_craigslist_base_url(site)}/search/cta?{query}"
+
+
+def _parse_craigslist_mileage(text: str) -> Optional[int]:
+    if not text:
+        return None
+    match = re.search(r"(\d{1,3}(?:,\d{3})?)\s*([kK])?\s*(?:miles?|mi\.?)\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    value = int(match.group(1).replace(",", ""))
+    if match.group(2):
+        value *= 1000
+    return value
+
+
+def _parse_craigslist_listings(html: str, site: str, car_type: str) -> list[CarListing]:
+    """Parse Craigslist search results into CarListing objects."""
+    soup = BeautifulSoup(html, "lxml")
+    base = _craigslist_base_url(site)
+    listings: list[CarListing] = []
+    seen_urls: set[str] = set()
+
+    card_selectors = [
+        "li.cl-search-result",
+        "li.cl-static-search-result",
+        "motion.li.cl-search-result",
+        "li.result-row",
+        "div.result-row",
+    ]
+    cards: list = []
+    for selector in card_selectors:
+        cards = soup.select(selector)
+        if cards:
+            logger.info("Craigslist DOM: matched selector '%s' -> %d cards", selector, len(cards))
+            break
+
+    if not cards:
+        cards = soup.select("a[href$='.html']")
+        logger.info("Craigslist DOM: fallback to posting links -> %d candidates", len(cards))
+
+    for card in cards[:50]:
+        try:
+            link = card if card.name == "a" else card.select_one("a[href$='.html']")
+            if not link or not link.get("href"):
+                continue
+
+            href = link.get("href", "").strip()
+            url = urljoin(base, href)
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            card_text = card.get_text(" ", strip=True)
+            link_text = link.get_text(" ", strip=True)
+            title_text = _extract_text(card, [".title"]) or link_text or card_text
+            title_text = re.sub(r"^\s*\$\s*[\d,]+\s*", "", title_text).strip()
+
+            price_el = card.select_one(".priceinfo, .price, .label")
+            price_text = price_el.get_text(strip=True) if price_el else card_text
+            price = _parse_price(price_text) or _parse_price(link_text) or _parse_price(title_text)
+            if price <= 0:
+                continue
+
+            mileage = _parse_craigslist_mileage(card_text) or _parse_craigslist_mileage(title_text)
+            year, make, model, trim = _parse_title(title_text)
+
+            image_el = card.select_one("img")
+            image_url = None
+            if image_el:
+                image_url = image_el.get("src") or image_el.get("data-src")
+                if image_url and image_url.startswith("/"):
+                    image_url = urljoin(base, image_url)
+
+            title_lower = title_text.lower()
+            title_status = "Clean"
+            if "salvage" in title_lower:
+                title_status = "Salvage"
+            elif "rebuilt" in title_lower:
+                title_status = "Rebuilt"
+
+            listings.append(CarListing(
+                title=title_text[:120] if title_text else "Unknown Vehicle",
+                price=price,
+                year=year,
+                mileage=mileage,
+                condition="Clean",
+                features=[],
+                url=url,
+                image_url=image_url,
+                source="Craigslist",
+                make=make,
+                model=model,
+                trim=trim,
+                body_style=car_type,
+                title_status=title_status,
+            ))
+        except Exception as exc:
+            logger.warning("Failed to parse Craigslist card: %s", exc)
+
+    logger.info("Craigslist: parsed %d listings", len(listings))
+    return listings
 
 
 # ---------------------------------------------------------------------------
@@ -1040,4 +1182,33 @@ async def scrape_carvana(
     logger.info("Carvana debug: %s", json.dumps(debug, default=str))
 
     listings = _parse_carvana_listings(html)
+    return filter_listings_by_car_type(listings, car_type)
+
+
+async def scrape_craigslist(
+    car_type: str,
+    budget_min: int,
+    budget_max: int,
+    api_key: str,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    mileage_max: Optional[int] = None,
+    site: str = CRAIGSLIST_SITE,
+) -> list[CarListing]:
+    url = _craigslist_search_url(
+        car_type, budget_min, budget_max, site=site,
+        year_min=year_min, year_max=year_max, mileage_max=mileage_max,
+    )
+    logger.info("Scraping Craigslist (%s): %s", site, url)
+
+    html = await _fetch_via_brightdata(url, api_key)
+    if not html:
+        logger.warning("Craigslist scrape returned no HTML")
+        return []
+
+    debug = get_scrape_debug_info(html, f"Craigslist-{site}")
+    debug["posting_links"] = len(re.findall(r'href="[^"]+\.html"', html[:200000]))
+    logger.info("Craigslist debug: %s", json.dumps(debug, default=str))
+
+    listings = _parse_craigslist_listings(html, site, car_type)
     return filter_listings_by_car_type(listings, car_type)

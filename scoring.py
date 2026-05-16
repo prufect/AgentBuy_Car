@@ -169,13 +169,15 @@ def score_feature_match(car: CarListing, req: SearchRequest) -> float:
 def score_source_trust(car: CarListing, req: SearchRequest) -> float:
     """
     Trustworthiness of the data source.
-    CarMax certified pre-owned > Carvana > unknown.
+    CarMax certified pre-owned > Carvana > Craigslist > unknown.
     """
     trust_scores = {
         "CarMax": 95.0,
         "carmax": 95.0,
         "Carvana": 90.0,
         "carvana": 90.0,
+        "Craigslist": 72.0,
+        "craigslist": 72.0,
     }
     return trust_scores.get(car.source, 70.0)
 

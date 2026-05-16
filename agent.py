@@ -28,7 +28,7 @@ from models import (
     JobState,
     JobStatus,
 )
-from scraper import scrape_carmax, scrape_carvana
+from scraper import scrape_carmax, scrape_carvana, scrape_craigslist
 from scoring import score_cars
 
 logger = logging.getLogger(__name__)
@@ -577,6 +577,7 @@ async def run_search_job(
         state.progress = "Scraping car listings..."
         state.progress_detail["scraping_carmax"] = SearchProgress(step="scraping_carmax", status="running")
         state.progress_detail["scraping_carvana"] = SearchProgress(step="scraping_carvana", status="running")
+        state.progress_detail["scraping_craigslist"] = SearchProgress(step="scraping_craigslist", status="running")
 
         carmax_task = scrape_carmax(
             car_type=request.car_type,
@@ -596,27 +597,44 @@ async def run_search_job(
             year_max=request.year_max,
             mileage_max=request.mileage_max,
         )
+        craigslist_task = scrape_craigslist(
+            car_type=request.car_type,
+            budget_min=request.budget_min,
+            budget_max=request.budget_max,
+            api_key=BRIGHTDATA_API_KEY,
+            year_min=request.year_min,
+            year_max=request.year_max,
+            mileage_max=request.mileage_max,
+        )
 
-        results = await asyncio.gather(carmax_task, carvana_task, return_exceptions=True)
+        results = await asyncio.gather(
+            carmax_task, carvana_task, craigslist_task, return_exceptions=True
+        )
 
         carmax_listings = results[0] if not isinstance(results[0], Exception) else []
         carvana_listings = results[1] if not isinstance(results[1], Exception) else []
+        craigslist_listings = results[2] if not isinstance(results[2], Exception) else []
 
-        if isinstance(results[0], Exception):
-            logger.error("CarMax scrape failed: %s", results[0])
-            state.progress_detail["scraping_carmax"] = SearchProgress(step="scraping_carmax", status="failed")
-        else:
-            state.progress_detail["scraping_carmax"] = SearchProgress(step="scraping_carmax", status="done")
+        scrape_outcomes = [
+            ("scraping_carmax", results[0], "CarMax"),
+            ("scraping_carvana", results[1], "Carvana"),
+            ("scraping_craigslist", results[2], "Craigslist"),
+        ]
+        for step_key, outcome, label in scrape_outcomes:
+            if isinstance(outcome, Exception):
+                logger.error("%s scrape failed: %s", label, outcome)
+                state.progress_detail[step_key] = SearchProgress(step=step_key, status="failed")
+            else:
+                state.progress_detail[step_key] = SearchProgress(step=step_key, status="done")
 
-        if isinstance(results[1], Exception):
-            logger.error("Carvana scrape failed: %s", results[1])
-            state.progress_detail["scraping_carvana"] = SearchProgress(step="scraping_carvana", status="failed")
-        else:
-            state.progress_detail["scraping_carvana"] = SearchProgress(step="scraping_carvana", status="done")
-
-        all_listings = carmax_listings + carvana_listings
-        logger.info("Total listings scraped: %d (CarMax: %d, Carvana: %d)",
-                     len(all_listings), len(carmax_listings), len(carvana_listings))
+        all_listings = carmax_listings + carvana_listings + craigslist_listings
+        logger.info(
+            "Total listings scraped: %d (CarMax: %d, Carvana: %d, Craigslist: %d)",
+            len(all_listings),
+            len(carmax_listings),
+            len(carvana_listings),
+            len(craigslist_listings),
+        )
 
         if not all_listings:
             state.status = JobStatus.completed
