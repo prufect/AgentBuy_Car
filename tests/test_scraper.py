@@ -1,5 +1,5 @@
 """
-Tests for scraper.py — price/mileage/title helpers and HTML parsers.
+Tests for scraper.py — URL builders, price/mileage/title helpers, and HTML parsers.
 """
 
 import pytest
@@ -9,6 +9,8 @@ from scraper import (
     _parse_title,
     _parse_carmax_listings,
     _parse_carvana_listings,
+    _carmax_search_url,
+    _carvana_search_url,
 )
 
 
@@ -259,6 +261,129 @@ CARVANA_FALLBACK_HTML = """
   </a>
 </body></html>
 """
+
+
+# ---------------------------------------------------------------------------
+# _carmax_search_url
+# ---------------------------------------------------------------------------
+
+class TestCarmaxSearchUrl:
+    def test_base_url(self):
+        url = _carmax_search_url("suv", 20000, 30000)
+        assert url.startswith("https://www.carmax.com/cars/all")
+
+    def test_body_style_mapped_to_title_case(self):
+        url = _carmax_search_url("suv", 20000, 30000)
+        assert "body=SUV" in url
+
+    def test_body_style_case_insensitive(self):
+        url_lower = _carmax_search_url("suv", 20000, 30000)
+        url_upper = _carmax_search_url("SUV", 20000, 30000)
+        assert "body=SUV" in url_lower
+        assert "body=SUV" in url_upper
+
+    def test_price_range_included(self):
+        url = _carmax_search_url("sedan", 15000, 25000)
+        assert "price=15000-25000" in url
+
+    def test_year_range_included_when_set(self):
+        url = _carmax_search_url("suv", 20000, 30000, year_min=2018, year_max=2024)
+        assert "year=2018-2024" in url
+
+    def test_year_range_omitted_when_not_set(self):
+        url = _carmax_search_url("suv", 20000, 30000)
+        assert "year=" not in url
+
+    def test_year_max_defaults_to_2026_when_year_min_set(self):
+        url = _carmax_search_url("suv", 20000, 30000, year_min=2018, year_max=None)
+        assert "year=2018-2026" in url
+
+    def test_mileage_included_when_set(self):
+        url = _carmax_search_url("suv", 20000, 30000, mileage_max=80000)
+        assert "mileage=0-80000" in url
+
+    def test_mileage_omitted_when_not_set(self):
+        url = _carmax_search_url("suv", 20000, 30000)
+        assert "mileage=" not in url
+
+    def test_all_params_combined(self):
+        url = _carmax_search_url("truck", 25000, 40000, year_min=2019, year_max=2023, mileage_max=60000)
+        assert "body=Truck" in url
+        assert "price=25000-40000" in url
+        assert "year=2019-2023" in url
+        assert "mileage=0-60000" in url
+
+    def test_unknown_car_type_passed_through(self):
+        url = _carmax_search_url("minivan", 20000, 30000)
+        assert "minivan" in url.lower()
+
+    def test_all_known_body_types_mapped(self):
+        types = ["suv", "sedan", "truck", "coupe", "hatchback", "van", "wagon", "convertible"]
+        for car_type in types:
+            url = _carmax_search_url(car_type, 20000, 30000)
+            assert "body=" in url
+
+
+# ---------------------------------------------------------------------------
+# _carvana_search_url
+# ---------------------------------------------------------------------------
+
+class TestCarvanaSearchUrl:
+    def test_base_url_with_body_in_path(self):
+        url = _carvana_search_url("suv", 20000, 30000)
+        assert url.startswith("https://www.carvana.com/cars/suv")
+
+    def test_body_style_lowercased_in_path(self):
+        url = _carvana_search_url("SUV", 20000, 30000)
+        assert "/suv" in url
+
+    def test_price_min_included(self):
+        url = _carvana_search_url("sedan", 15000, 25000)
+        assert "priceMin=15000" in url
+
+    def test_price_max_included(self):
+        url = _carvana_search_url("sedan", 15000, 25000)
+        assert "priceMax=25000" in url
+
+    def test_year_min_included_when_set(self):
+        url = _carvana_search_url("suv", 20000, 30000, year_min=2018)
+        assert "yearMin=2018" in url
+
+    def test_year_max_included_when_set(self):
+        url = _carvana_search_url("suv", 20000, 30000, year_max=2024)
+        assert "yearMax=2024" in url
+
+    def test_year_params_omitted_when_not_set(self):
+        url = _carvana_search_url("suv", 20000, 30000)
+        assert "yearMin=" not in url
+        assert "yearMax=" not in url
+
+    def test_mileage_included_when_set(self):
+        url = _carvana_search_url("suv", 20000, 30000, mileage_max=80000)
+        assert "milesMax=80000" in url
+
+    def test_mileage_omitted_when_not_set(self):
+        url = _carvana_search_url("suv", 20000, 30000)
+        assert "milesMax=" not in url
+
+    def test_all_params_combined(self):
+        url = _carvana_search_url("truck", 25000, 40000, year_min=2019, year_max=2023, mileage_max=60000)
+        assert "/truck" in url
+        assert "priceMin=25000" in url
+        assert "priceMax=40000" in url
+        assert "yearMin=2019" in url
+        assert "yearMax=2023" in url
+        assert "milesMax=60000" in url
+
+    def test_unknown_car_type_lowercased_in_path(self):
+        url = _carvana_search_url("Minivan", 20000, 30000)
+        assert "/minivan" in url
+
+    def test_all_known_body_types_in_path(self):
+        types = ["suv", "sedan", "truck", "coupe", "hatchback", "van", "wagon", "convertible"]
+        for car_type in types:
+            url = _carvana_search_url(car_type, 20000, 30000)
+            assert f"/{car_type}" in url
 
 
 class TestParseCarvanaListings:
