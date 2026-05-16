@@ -78,6 +78,10 @@ class CarListing(BaseModel):
     make: Optional[str] = Field(None, description="Extracted make, e.g. 'Toyota'")
     model: Optional[str] = Field(None, description="Extracted model, e.g. 'RAV4'")
     trim: Optional[str] = Field(None, description="Trim level, e.g. 'XLE'")
+    body_style: Optional[str] = Field(
+        None,
+        description="Body style from the listing, e.g. 'SUV', 'Sedan', 'Hatchback'",
+    )
     accident_count: Optional[int] = Field(None, description="Number of reported accidents, if available")
     title_status: Optional[str] = Field(None, description="Title status: Clean, Rebuilt, Salvage")
 

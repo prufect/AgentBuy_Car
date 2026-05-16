@@ -59,21 +59,104 @@ async def _fetch_via_brightdata(url: str, api_key: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Body-style filtering
+# ---------------------------------------------------------------------------
+
+CARMAX_BODY_PATH = {
+    "suv": "suvs",
+    "sedan": "sedans",
+    "truck": "trucks",
+    "coupe": "coupes",
+    "hatchback": "hatchbacks",
+    "van": "vans",
+    "wagon": "wagons",
+    "convertible": "convertibles",
+}
+
+# Substrings that indicate a listing's body style (lowercase keys).
+CAR_TYPE_ALIASES: dict[str, set[str]] = {
+    "SUV": {"suv", "sport utility", "crossover", "crossovers"},
+    "Sedan": {"sedan"},
+    "Truck": {"truck", "pickup", "pickups"},
+    "Coupe": {"coupe"},
+    "Hatchback": {"hatchback", "hatchbacks"},
+    "Van": {"van", "minivan", "minivans"},
+    "Wagon": {"wagon", "wagons"},
+    "Convertible": {"convertible", "convertibles"},
+}
+
+
+def _extract_body_style(data: dict) -> Optional[str]:
+    """Read body style from common inventory JSON field names."""
+    for key in (
+        "bodyStyle",
+        "bodyType",
+        "body_type",
+        "vehicleType",
+        "vehicle_type",
+        "carType",
+        "segment",
+        "body",
+        "vehicleBody",
+        "vehicleBodyStyle",
+    ):
+        value = data.get(key)
+        if isinstance(value, dict):
+            value = value.get("name") or value.get("label") or value.get("value")
+        if value and isinstance(value, str):
+            return value.strip()
+
+    for key, value in data.items():
+        if not isinstance(value, str):
+            continue
+        lowered = key.lower()
+        if "body" in lowered and ("style" in lowered or "type" in lowered):
+            return value.strip()
+    return None
+
+
+def _body_style_matches_car_type(body_style: str, car_type: str) -> bool:
+    actual = body_style.lower().strip()
+    aliases = CAR_TYPE_ALIASES.get(car_type, {car_type.lower()})
+    return any(alias in actual for alias in aliases)
+
+
+def filter_listings_by_car_type(listings: list[CarListing], car_type: str) -> list[CarListing]:
+    """Keep only listings that match the requested body style when we can tell."""
+    if not car_type or not listings:
+        return listings
+
+    kept: list[CarListing] = []
+    dropped = 0
+    for listing in listings:
+        if not listing.body_style:
+            dropped += 1
+            continue
+        if _body_style_matches_car_type(listing.body_style, car_type):
+            kept.append(listing)
+        else:
+            dropped += 1
+
+    if dropped:
+        logger.info(
+            "Filtered %d/%d listings that did not match body style %s",
+            dropped,
+            len(listings),
+            car_type,
+        )
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # URL builders
 # ---------------------------------------------------------------------------
 
 def _carmax_search_url(car_type: str, budget_min: int, budget_max: int,
                        year_min: Optional[int] = None, year_max: Optional[int] = None,
                        mileage_max: Optional[int] = None) -> str:
-    base = "https://www.carmax.com/cars/all"
+    body_slug = CARMAX_BODY_PATH.get(car_type.lower(), car_type.lower())
+    base = f"https://www.carmax.com/cars/{body_slug}"
     params = []
-    body_map = {
-        "suv": "SUV", "sedan": "Sedan", "truck": "Truck",
-        "coupe": "Coupe", "hatchback": "Hatchback", "van": "Van",
-        "wagon": "Wagon", "convertible": "Convertible",
-    }
-    body = body_map.get(car_type.lower(), car_type)
-    params.append(f"body={quote_plus(body)}")
     params.append(f"price={budget_min}-{budget_max}")
     if year_min:
         params.append(f"year={year_min}-{year_max or 2026}")
@@ -286,6 +369,7 @@ def _normalize_carmax_json(data: dict) -> dict:
         "make": make,
         "model": model,
         "trim": trim,
+        "body_style": _extract_body_style(data),
         "exterior_color": data.get("exteriorColor"),
         "interior_color": data.get("interiorColor"),
         "transmission": data.get("transmission"),
@@ -364,6 +448,7 @@ def _normalize_carvana_json(data: dict) -> dict:
         "make": make,
         "model": model,
         "trim": trim,
+        "body_style": _extract_body_style(data),
         "exterior_color": data.get("color"),
         "interior_color": data.get("interiorColor"),
         "transmission": data.get("transmission"),
@@ -481,6 +566,7 @@ def _normalize_json_vehicle(data: dict) -> dict:
         "make": make,
         "model": model,
         "trim": trim,
+        "body_style": _extract_body_style(data),
     }
 
 
@@ -545,6 +631,7 @@ def _parse_carmax_listings(html: str) -> list[CarListing]:
                     make=v.get("make") or make,
                     model=v.get("model") or model,
                     trim=v.get("trim") or trim,
+                    body_style=v.get("body_style"),
                     title_status="Clean",
                 ))
             except Exception as exc:
@@ -608,7 +695,7 @@ def _parse_carmax_listings(html: str) -> list[CarListing]:
                 title=title, price=price, year=year, mileage=mileage,
                 condition="Clean", features=features[:15], url=url,
                 image_url=image_url, source="CarMax",
-                make=make, model=model, trim=trim, title_status="Clean",
+                make=make, model=model, trim=trim, body_style=None, title_status="Clean",
             ))
         except Exception as exc:
             logger.warning("Failed to parse CarMax card: %s", exc)
@@ -642,6 +729,7 @@ def _parse_carvana_listings(html: str) -> list[CarListing]:
                     make=v.get("make") or make,
                     model=v.get("model") or model,
                     trim=v.get("trim") or trim,
+                    body_style=v.get("body_style"),
                     title_status="Clean",
                 ))
             except Exception as exc:
@@ -706,7 +794,7 @@ def _parse_carvana_listings(html: str) -> list[CarListing]:
                 title=title, price=price, year=year, mileage=mileage,
                 condition="Clean", features=features[:15], url=url,
                 image_url=image_url, source="Carvana",
-                make=make, model=model, trim=trim, title_status="Clean",
+                make=make, model=model, trim=trim, body_style=None, title_status="Clean",
             ))
         except Exception as exc:
             logger.warning("Failed to parse Carvana card: %s", exc)
@@ -818,7 +906,7 @@ def _regex_extract_vehicles(html: str, source: str) -> list[CarListing]:
             title=title, price=price, year=year, mileage=None,
             condition="Clean", features=[], url="",
             image_url=None, source=source,
-            make=make, model=model, trim=None, title_status="Clean",
+            make=make, model=model, trim=None, body_style=None, title_status="Clean",
         ))
         if len(listings) >= 50:
             break
@@ -930,7 +1018,8 @@ async def scrape_carmax(
     debug = get_scrape_debug_info(html, "CarMax")
     logger.info("CarMax debug: %s", json.dumps(debug, default=str))
 
-    return _parse_carmax_listings(html)
+    listings = _parse_carmax_listings(html)
+    return filter_listings_by_car_type(listings, car_type)
 
 
 async def scrape_carvana(
@@ -950,4 +1039,5 @@ async def scrape_carvana(
     debug = get_scrape_debug_info(html, "Carvana")
     logger.info("Carvana debug: %s", json.dumps(debug, default=str))
 
-    return _parse_carvana_listings(html)
+    listings = _parse_carvana_listings(html)
+    return filter_listings_by_car_type(listings, car_type)
