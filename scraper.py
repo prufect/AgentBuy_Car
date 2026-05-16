@@ -161,15 +161,126 @@ def filter_listings_by_car_type(listings: list[CarListing], car_type: str) -> li
     return kept
 
 
+MAKE_ALIASES: dict[str, list[str]] = {
+    "bmw": ["bmw"],
+    "chevrolet": ["chevrolet", "chevy"],
+    "mercedes-benz": ["mercedes-benz", "mercedes"],
+    "volkswagen": ["volkswagen", "vw"],
+    "land rover": ["land rover"],
+    "alfa romeo": ["alfa romeo"],
+}
+
+
+def _normalize_make_name(make: str) -> str:
+    lowered = make.strip().lower()
+    if lowered == "chevy":
+        return "Chevrolet"
+    if lowered == "vw":
+        return "Volkswagen"
+    if lowered == "mercedes":
+        return "Mercedes-Benz"
+    if lowered == "bmw":
+        return "BMW"
+    return make.strip().title()
+
+
+def _normalize_model_name(model: str) -> str:
+    cleaned = model.strip()
+    if not cleaned:
+        return cleaned
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]*", cleaned, re.IGNORECASE):
+        return cleaned.lower() if cleaned[0].isdigit() else cleaned.title()
+    return cleaned.title()
+
+
+def _listing_matches_make(listing: CarListing, make: str) -> bool:
+    target = _normalize_make_name(make).lower()
+    aliases = MAKE_ALIASES.get(target, [target])
+    haystacks = [
+        (listing.make or "").lower(),
+        (listing.title or "").lower(),
+    ]
+    return any(any(alias in hay for alias in aliases) for hay in haystacks if hay)
+
+
+def _listing_matches_model(listing: CarListing, model: str) -> bool:
+    target = re.sub(r"[\s-]+", "", model.lower())
+    if not target:
+        return True
+
+    haystacks = [
+        re.sub(r"[\s-]+", "", (listing.model or "").lower()),
+        re.sub(r"[\s-]+", "", (listing.title or "").lower()),
+        re.sub(r"[\s-]+", "", (listing.trim or "").lower()),
+    ]
+    return any(target in hay for hay in haystacks if hay)
+
+
+def filter_listings_by_make_model(
+    listings: list[CarListing],
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+) -> list[CarListing]:
+    """Keep listings that match requested make and/or model."""
+    if not listings or (not make and not model):
+        return listings
+
+    kept: list[CarListing] = []
+    dropped = 0
+    for listing in listings:
+        if make and not _listing_matches_make(listing, make):
+            dropped += 1
+            continue
+        if model and not _listing_matches_model(listing, model):
+            dropped += 1
+            continue
+        kept.append(listing)
+
+    if dropped:
+        logger.info(
+            "Filtered %d/%d listings that did not match make=%s model=%s",
+            dropped,
+            len(listings),
+            make,
+            model,
+        )
+    return kept
+
+
+def _apply_listing_filters(
+    listings: list[CarListing],
+    car_type: str,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+) -> list[CarListing]:
+    listings = filter_listings_by_car_type(listings, car_type)
+    return filter_listings_by_make_model(listings, make, model)
+
+
+def _inventory_slug(value: str) -> str:
+    return quote_plus(value.strip().lower().replace(" ", "-"))
+
+
 # ---------------------------------------------------------------------------
 # URL builders
 # ---------------------------------------------------------------------------
 
-def _carmax_search_url(car_type: str, budget_min: int, budget_max: int,
-                       year_min: Optional[int] = None, year_max: Optional[int] = None,
-                       mileage_max: Optional[int] = None) -> str:
+def _carmax_search_url(
+    car_type: str,
+    budget_min: int,
+    budget_max: int,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    mileage_max: Optional[int] = None,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     body_slug = CARMAX_BODY_PATH.get(car_type.lower(), car_type.lower())
     base = f"https://www.carmax.com/cars/{body_slug}"
+    if make:
+        base = f"{base}/{_inventory_slug(make)}"
+    if model:
+        base = f"{base}/{_inventory_slug(model)}"
     params = []
     params.append(f"price={budget_min}-{budget_max}")
     if year_min:
@@ -179,9 +290,16 @@ def _carmax_search_url(car_type: str, budget_min: int, budget_max: int,
     return f"{base}?{'&'.join(params)}"
 
 
-def _carvana_search_url(car_type: str, budget_min: int, budget_max: int,
-                        year_min: Optional[int] = None, year_max: Optional[int] = None,
-                        mileage_max: Optional[int] = None) -> str:
+def _carvana_search_url(
+    car_type: str,
+    budget_min: int,
+    budget_max: int,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    mileage_max: Optional[int] = None,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     base = "https://www.carvana.com/cars"
     body_map = {
         "suv": "suv", "sedan": "sedan", "truck": "truck",
@@ -190,6 +308,10 @@ def _carvana_search_url(car_type: str, budget_min: int, budget_max: int,
     }
     body = body_map.get(car_type.lower(), car_type.lower())
     path = f"{base}/{body}"
+    if make:
+        path = f"{path}/{_inventory_slug(make)}"
+    if model:
+        path = f"{path}/{_inventory_slug(model)}"
     params = [f"priceMin={budget_min}", f"priceMax={budget_max}"]
     if year_min:
         params.append(f"yearMin={year_min}")
@@ -212,6 +334,8 @@ def _craigslist_search_url(
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
     mileage_max: Optional[int] = None,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> str:
     """Build a Craigslist cars & trucks search URL for a regional site."""
     params = [f"min_price={budget_min}", f"max_price={budget_max}"]
@@ -224,6 +348,9 @@ def _craigslist_search_url(
         params.append(f"max_auto_year={year_max}")
     if mileage_max:
         params.append(f"max_auto_miles={mileage_max}")
+    if make or model:
+        make_model = " ".join(part for part in (make, model) if part).strip()
+        params.append(f"auto_make_model={quote_plus(make_model)}")
     query = "&".join(params)
     return f"{_craigslist_base_url(site)}/search/cta?{query}"
 
@@ -1147,8 +1274,11 @@ async def scrape_carmax(
     car_type: str, budget_min: int, budget_max: int, api_key: str,
     year_min: Optional[int] = None, year_max: Optional[int] = None,
     mileage_max: Optional[int] = None,
+    make: Optional[str] = None, model: Optional[str] = None,
 ) -> list[CarListing]:
-    url = _carmax_search_url(car_type, budget_min, budget_max, year_min, year_max, mileage_max)
+    url = _carmax_search_url(
+        car_type, budget_min, budget_max, year_min, year_max, mileage_max, make, model
+    )
     logger.info("Scraping CarMax: %s", url)
 
     html = await _fetch_via_brightdata(url, api_key)
@@ -1161,15 +1291,18 @@ async def scrape_carmax(
     logger.info("CarMax debug: %s", json.dumps(debug, default=str))
 
     listings = _parse_carmax_listings(html)
-    return filter_listings_by_car_type(listings, car_type)
+    return _apply_listing_filters(listings, car_type, make, model)
 
 
 async def scrape_carvana(
     car_type: str, budget_min: int, budget_max: int, api_key: str,
     year_min: Optional[int] = None, year_max: Optional[int] = None,
     mileage_max: Optional[int] = None,
+    make: Optional[str] = None, model: Optional[str] = None,
 ) -> list[CarListing]:
-    url = _carvana_search_url(car_type, budget_min, budget_max, year_min, year_max, mileage_max)
+    url = _carvana_search_url(
+        car_type, budget_min, budget_max, year_min, year_max, mileage_max, make, model
+    )
     logger.info("Scraping Carvana: %s", url)
 
     html = await _fetch_via_brightdata(url, api_key)
@@ -1182,7 +1315,7 @@ async def scrape_carvana(
     logger.info("Carvana debug: %s", json.dumps(debug, default=str))
 
     listings = _parse_carvana_listings(html)
-    return filter_listings_by_car_type(listings, car_type)
+    return _apply_listing_filters(listings, car_type, make, model)
 
 
 async def scrape_craigslist(
@@ -1194,10 +1327,13 @@ async def scrape_craigslist(
     year_max: Optional[int] = None,
     mileage_max: Optional[int] = None,
     site: str = CRAIGSLIST_SITE,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> list[CarListing]:
     url = _craigslist_search_url(
         car_type, budget_min, budget_max, site=site,
         year_min=year_min, year_max=year_max, mileage_max=mileage_max,
+        make=make, model=model,
     )
     logger.info("Scraping Craigslist (%s): %s", site, url)
 
@@ -1211,4 +1347,4 @@ async def scrape_craigslist(
     logger.info("Craigslist debug: %s", json.dumps(debug, default=str))
 
     listings = _parse_craigslist_listings(html, site, car_type)
-    return filter_listings_by_car_type(listings, car_type)
+    return _apply_listing_filters(listings, car_type, make, model)

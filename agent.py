@@ -47,6 +47,20 @@ LLM_MODEL = os.getenv("LLM_MODEL", "qwen-plus")
 
 BODY_STYLES = ["SUV", "Sedan", "Truck", "Coupe", "Hatchback", "Van", "Wagon", "Convertible"]
 CONDITIONS = ["Like New", "Excellent", "Clean", "Good", "Fair"]
+KNOWN_MAKES = [
+    "Mercedes-Benz", "Land Rover", "Alfa Romeo", "Aston Martin",
+    "Toyota", "Honda", "Ford", "Chevrolet", "Chevy", "Hyundai", "Kia",
+    "Nissan", "Volkswagen", "VW", "Subaru", "Mazda", "BMW", "Mercedes",
+    "Audi", "Lexus", "Acura", "Infiniti", "Buick", "Cadillac", "Chrysler",
+    "Dodge", "GMC", "Jeep", "Lincoln", "Ram", "Tesla", "Volvo", "Porsche",
+    "MINI", "Mitsubishi", "Suzuki", "Genesis", "Rivian",
+]
+MAKE_MODEL_STOP_WORDS = {
+    "under", "below", "with", "and", "for", "in", "or", "newer", "less",
+    "than", "max", "maximum", "budget", "miles", "mileage", "carplay",
+    "convertible", "suv", "sedan", "truck", "coupe", "hatchback", "van",
+    "wagon", "crossover", "pickup", "clean", "excellent", "good", "fair",
+}
 FEATURE_PATTERNS = {
     "Backup Camera": [r"\bbackup camera\b", r"\brear camera\b", r"\brearview camera\b"],
     "Bluetooth": [r"\bbluetooth\b"],
@@ -84,7 +98,9 @@ Return ONLY a valid JSON object with this shape:
     "year_max": null,
     "mileage_max": 65000,
     "must_have_features": ["Apple CarPlay"],
-    "condition": null
+    "condition": null,
+    "make": "BMW",
+    "model": "430i"
   }}
 }}
 
@@ -98,6 +114,8 @@ Rules:
 - Do not invent required fields. Use null for unknown values.
 - Use integers for money, years, and mileage.
 - Include optional fields only when the user says or strongly implies them.
+- When the user names a specific vehicle (e.g. BMW 430i, Honda CR-V), set make and model.
+- model should be the model line or trim they asked for (e.g. 430i, RAV4, F-150), not the body style.
 
 User brief:
 {query}"""
@@ -153,6 +171,8 @@ def _coerce_partial_params(raw: Any) -> dict[str, Any]:
         "mileage_max",
         "must_have_features",
         "condition",
+        "make",
+        "model",
     ):
         value = raw.get(key)
         if value is not None:
@@ -168,6 +188,11 @@ def _coerce_partial_params(raw: Any) -> dict[str, Any]:
             partial["must_have_features"] = _normalize_features([str(feature) for feature in features])
         else:
             partial["must_have_features"] = []
+
+    if "make" in partial and partial["make"]:
+        partial["make"] = _normalize_make(str(partial["make"]))
+    if "model" in partial and partial["model"]:
+        partial["model"] = _normalize_model(str(partial["model"]))
 
     for key in ("budget_min", "budget_max", "year_min", "year_max", "mileage_max"):
         if key in partial:
@@ -208,6 +233,12 @@ def _extract_local_search_params(query: str) -> dict[str, Any]:
     if condition:
         partial["condition"] = condition
 
+    make, model = _extract_make_model(lowered)
+    if make:
+        partial["make"] = make
+    if model:
+        partial["model"] = model
+
     return partial
 
 
@@ -230,6 +261,8 @@ def _response_from_partial(partial: dict[str, Any], source: str) -> SearchInterp
             mileage_max=params.get("mileage_max"),
             must_have_features=params.get("must_have_features", []),
             condition=params.get("condition"),
+            make=params.get("make"),
+            model=params.get("model"),
         )
     except (KeyError, ValidationError, TypeError, ValueError):
         return SearchInterpretResponse(
@@ -271,8 +304,58 @@ def _required_questions(params: dict[str, Any]) -> list[SearchClarifyingQuestion
     return questions
 
 
+def _normalize_make(value: str) -> str:
+    lowered = value.strip().lower()
+    if lowered in ("chevy",):
+        return "Chevrolet"
+    if lowered == "vw":
+        return "Volkswagen"
+    if lowered == "mercedes":
+        return "Mercedes-Benz"
+    if lowered == "bmw":
+        return "BMW"
+    return value.strip().title()
+
+
+def _normalize_model(value: str) -> str:
+    cleaned = value.strip()
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]*", cleaned, re.IGNORECASE):
+        return cleaned.lower() if cleaned[0].isdigit() else cleaned.title()
+    return cleaned.title()
+
+
+def _extract_make_model(lowered: str):
+    for make in sorted(KNOWN_MAKES, key=len, reverse=True):
+        pattern = rf"\b{re.escape(make.lower())}\b"
+        match = re.search(pattern, lowered)
+        if not match:
+            continue
+
+        canonical = _normalize_make(make)
+        rest = lowered[match.end():]
+        model_match = re.match(
+            r"^[\s,.-]+([a-z0-9][a-z0-9-]*)",
+            rest,
+            re.IGNORECASE,
+        )
+        model = None
+        if model_match:
+            candidate = model_match.group(1).lower()
+            if candidate not in MAKE_MODEL_STOP_WORDS and not candidate.isdigit():
+                model = _normalize_model(candidate)
+
+        return canonical, model
+
+    return None, None
+
+
 def _summarize_search_request(request: SearchRequest) -> str:
-    parts = [request.car_type, f"${request.budget_min:,}-${request.budget_max:,}"]
+    vehicle = request.car_type
+    if request.make and request.model:
+        vehicle = f"{request.make} {request.model} ({request.car_type})"
+    elif request.make:
+        vehicle = f"{request.make} ({request.car_type})"
+    parts = [vehicle, f"${request.budget_min:,}-${request.budget_max:,}"]
     if request.year_min:
         parts.append(f"{request.year_min}+")
     if request.mileage_max:
@@ -579,7 +662,7 @@ async def run_search_job(
         state.progress_detail["scraping_carvana"] = SearchProgress(step="scraping_carvana", status="running")
         state.progress_detail["scraping_craigslist"] = SearchProgress(step="scraping_craigslist", status="running")
 
-        carmax_task = scrape_carmax(
+        scrape_kwargs = dict(
             car_type=request.car_type,
             budget_min=request.budget_min,
             budget_max=request.budget_max,
@@ -587,25 +670,12 @@ async def run_search_job(
             year_min=request.year_min,
             year_max=request.year_max,
             mileage_max=request.mileage_max,
+            make=request.make,
+            model=request.model,
         )
-        carvana_task = scrape_carvana(
-            car_type=request.car_type,
-            budget_min=request.budget_min,
-            budget_max=request.budget_max,
-            api_key=BRIGHTDATA_API_KEY,
-            year_min=request.year_min,
-            year_max=request.year_max,
-            mileage_max=request.mileage_max,
-        )
-        craigslist_task = scrape_craigslist(
-            car_type=request.car_type,
-            budget_min=request.budget_min,
-            budget_max=request.budget_max,
-            api_key=BRIGHTDATA_API_KEY,
-            year_min=request.year_min,
-            year_max=request.year_max,
-            mileage_max=request.mileage_max,
-        )
+        carmax_task = scrape_carmax(**scrape_kwargs)
+        carvana_task = scrape_carvana(**scrape_kwargs)
+        craigslist_task = scrape_craigslist(**scrape_kwargs)
 
         results = await asyncio.gather(
             carmax_task, carvana_task, craigslist_task, return_exceptions=True

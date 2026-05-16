@@ -41,6 +41,8 @@ class SearchRequest(BaseModel):
         None,
         description="Preferred condition: Clean, Like New, Excellent, Good, Fair",
     )
+    make: Optional[str] = Field(None, description="Vehicle make, e.g. 'BMW', 'Toyota'")
+    model: Optional[str] = Field(None, description="Vehicle model, e.g. '430i', 'RAV4'")
 
 
 class SearchInterpretRequest(BaseModel):
