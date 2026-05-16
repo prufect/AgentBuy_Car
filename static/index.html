@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoBrief — AI Car Buying Advisor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">🚗</span>
+          <span class="logo-text">AutoBrief</span>
+        </div>
+        <p class="tagline">AI-Powered Car Buying Advisor</p>
+      </div>
+    </header>
+
+    <main class="main">
+
+      <!-- Search Form -->
+      <section id="form-section" class="section">
+        <div class="card form-card">
+          <h1 class="card-title">Find your perfect car</h1>
+          <p class="card-subtitle">Tell us what you're looking for and we'll find, score, and rank the best options from CarMax & Carvana.</p>
+
+          <form id="search-form" novalidate>
+
+            <div class="form-row">
+              <div class="field">
+                <label for="car-type" class="label">Car Type</label>
+                <select id="car-type" class="input" required>
+                  <option value="">Select body style...</option>
+                  <option value="SUV">SUV</option>
+                  <option value="Sedan">Sedan</option>
+                  <option value="Truck">Truck</option>
+                  <option value="Coupe">Coupe</option>
+                  <option value="Hatchback">Hatchback</option>
+                  <option value="Van">Van</option>
+                  <option value="Wagon">Wagon</option>
+                  <option value="Convertible">Convertible</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="condition" class="label">Condition <span class="label-hint optional">optional</span></label>
+                <select id="condition" class="input">
+                  <option value="">Any condition</option>
+                  <option value="Like New">Like New</option>
+                  <option value="Excellent">Excellent</option>
+                  <option value="Clean">Clean</option>
+                  <option value="Good">Good</option>
+                  <option value="Fair">Fair</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="field">
+                <label for="budget-min" class="label">Budget Min ($)</label>
+                <input id="budget-min" type="number" class="input" placeholder="10,000" min="0" step="500" required />
+              </div>
+              <div class="field">
+                <label for="budget-max" class="label">Budget Max ($)</label>
+                <input id="budget-max" type="number" class="input" placeholder="30,000" min="0" step="500" required />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="field">
+                <label for="year-min" class="label">Year From <span class="label-hint optional">optional</span></label>
+                <input id="year-min" type="number" class="input" placeholder="2018" min="2000" max="2026" />
+              </div>
+              <div class="field">
+                <label for="year-max" class="label">Year To <span class="label-hint optional">optional</span></label>
+                <input id="year-max" type="number" class="input" placeholder="2024" min="2000" max="2026" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="mileage-max" class="label">Max Mileage <span class="label-hint optional">optional</span></label>
+              <input id="mileage-max" type="number" class="input" placeholder="e.g. 60000" min="0" step="1000" />
+            </div>
+
+            <div class="field">
+              <label class="label">Must-Have Features <span class="label-hint optional">optional</span></label>
+              <div class="feature-grid">
+                <label class="feature-checkbox"><input type="checkbox" value="Backup Camera" /> Backup Camera</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Bluetooth" /> Bluetooth</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Apple CarPlay" /> Apple CarPlay</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Android Auto" /> Android Auto</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Leather Seats" /> Leather Seats</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Sunroof" /> Sunroof</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Navigation" /> Navigation</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Heated Seats" /> Heated Seats</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Blind Spot Monitor" /> Blind Spot Monitor</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Lane Departure Warning" /> Lane Departure</label>
+                <label class="feature-checkbox"><input type="checkbox" value="Remote Start" /> Remote Start</label>
+                <label class="feature-checkbox"><input type="checkbox" value="4WD/AWD" /> 4WD/AWD</label>
+              </div>
+            </div>
+
+            <button type="submit" id="submit-btn" class="btn btn-primary">
+              <span class="btn-text">Find My Car</span>
+              <span class="btn-arrow">→</span>
+            </button>
+
+          </form>
+        </div>
+      </section>
+
+      <!-- Loading State -->
+      <section id="loading-section" class="section hidden">
+        <div class="card loading-card">
+          <div class="loading-header">
+            <div class="spinner"></div>
+            <div>
+              <h2 class="loading-title" id="loading-title">Searching for your perfect car...</h2>
+              <p class="loading-sub">Scanning CarMax & Carvana, this takes 30-60 seconds</p>
+            </div>
+          </div>
+
+          <div id="progress-list" class="progress-list"></div>
+        </div>
+      </section>
+
+      <!-- Results -->
+      <section id="results-section" class="section hidden">
+        <div class="results-header">
+          <div>
+            <h2 id="result-title" class="results-title">Top Cars For You</h2>
+            <p id="result-meta" class="results-meta"></p>
+          </div>
+          <button id="new-search-btn" class="btn btn-secondary">New Search</button>
+        </div>
+
+        <div id="search-params-summary" class="params-summary hidden"></div>
+
+        <div id="car-cards" class="car-grid"></div>
+      </section>
+
+      <!-- Error -->
+      <section id="error-section" class="section hidden">
+        <div class="card error-card">
+          <div class="error-icon">✕</div>
+          <h3 class="error-title">Search Failed</h3>
+          <p id="error-text" class="error-text"></p>
+          <button onclick="resetApp()" class="btn btn-secondary">Try Again</button>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="site-footer">
+      <p>AutoBrief · Powered by Bright Data, AgentField & Zeabur</p>
+    </footer>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
