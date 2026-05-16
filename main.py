@@ -15,8 +15,18 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from models import SearchRequest, JobState, JobStatus, ScoredCar, CarListing, ScoreBreakdown, SearchResult
-from agent import run_search_job
+from models import (
+    SearchInterpretRequest,
+    SearchInterpretResponse,
+    SearchRequest,
+    JobState,
+    JobStatus,
+    ScoredCar,
+    CarListing,
+    ScoreBreakdown,
+    SearchResult,
+)
+from agent import interpret_search_query, run_search_job
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +79,15 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
     )
 
     return {"job_id": job_id}
+
+
+@app.post("/search/interpret", response_model=SearchInterpretResponse)
+async def interpret_search(req: SearchInterpretRequest):
+    """Turn a natural-language brief into search params or required questions."""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="Search brief cannot be empty.")
+
+    return await interpret_search_query(req.query)
 
 
 @app.get("/search/{job_id}")

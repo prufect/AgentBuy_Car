@@ -4,7 +4,7 @@ All team members code against these interfaces.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from enum import Enum
 
 
@@ -43,6 +43,24 @@ class SearchRequest(BaseModel):
     )
 
 
+class SearchInterpretRequest(BaseModel):
+    query: str = Field(..., description="Natural-language car search brief")
+
+
+class SearchClarifyingQuestion(BaseModel):
+    id: str = Field(..., description="Stable question id for the frontend")
+    question: str = Field(..., description="Question to ask before searching")
+    field: str = Field(..., description="SearchRequest field this question fills")
+
+
+class SearchInterpretResponse(BaseModel):
+    status: Literal["ready", "needs_clarification"]
+    search_params: Optional[SearchRequest] = None
+    questions: list[SearchClarifyingQuestion] = Field(default_factory=list)
+    summary: Optional[str] = Field(None, description="Short readable description of the interpreted search")
+    source: Optional[str] = Field(None, description="Interpretation source: llm or local")
+
+
 # ---------------------------------------------------------------------------
 # Scraped car data (normalised from CarMax / Carvana)
 # ---------------------------------------------------------------------------
@@ -60,6 +78,10 @@ class CarListing(BaseModel):
     make: Optional[str] = Field(None, description="Extracted make, e.g. 'Toyota'")
     model: Optional[str] = Field(None, description="Extracted model, e.g. 'RAV4'")
     trim: Optional[str] = Field(None, description="Trim level, e.g. 'XLE'")
+    body_style: Optional[str] = Field(
+        None,
+        description="Body style from the listing, e.g. 'SUV', 'Sedan', 'Hatchback'",
+    )
     accident_count: Optional[int] = Field(None, description="Number of reported accidents, if available")
     title_status: Optional[str] = Field(None, description="Title status: Clean, Rebuilt, Salvage")
 

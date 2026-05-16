@@ -5,7 +5,6 @@ import {
   ArrowRight,
   BadgeCheck,
   Car,
-  Check,
   ChevronRight,
   CircleDollarSign,
   Gauge,
@@ -26,34 +25,8 @@ import {
 const h = React.createElement;
 const { useEffect, useRef, useState } = React;
 
-const carTypes = ["SUV", "Sedan", "Truck", "Coupe", "Hatchback", "Van", "Wagon", "Convertible"];
-const conditions = ["Like New", "Excellent", "Clean", "Good", "Fair"];
-const features = [
-  "Backup Camera",
-  "Bluetooth",
-  "Apple CarPlay",
-  "Android Auto",
-  "Leather Seats",
-  "Sunroof",
-  "Navigation",
-  "Heated Seats",
-  "Blind Spot Monitor",
-  "Lane Departure Warning",
-  "Remote Start",
-  "4WD/AWD",
-];
-
-const initialForm = {
-  carType: "SUV",
-  condition: "Clean",
-  budgetMin: "15000",
-  budgetMax: "35000",
-  yearMin: "2019",
-  yearMax: "2026",
-  mileageMax: "65000",
-};
-
-const initialFeatures = ["Backup Camera", "Apple CarPlay", "Blind Spot Monitor"];
+const initialSearchQuery =
+  "I need a reliable family SUV under $35k, 2019 or newer, under 65k miles, with Apple CarPlay and blind spot monitoring.";
 
 const defaultProgress = [
   { step: "scraping_carmax", status: "pending" },
@@ -75,12 +48,6 @@ function icon(Icon, className = "icon", extraProps = {}) {
 
 function cls(...parts) {
   return parts.filter(Boolean).join(" ");
-}
-
-function numberOrNull(value) {
-  if (value === "" || value == null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatMoney(value) {
@@ -122,12 +89,14 @@ function Reveal({ as = "div", className, children, delay = 0, ...props }) {
 }
 
 function App() {
-  const [formData, setFormData] = useState(initialForm);
-  const [selectedFeatures, setSelectedFeatures] = useState(initialFeatures);
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+  const [clarifyingQuestions, setClarifyingQuestions] = useState([]);
+  const [clarifyingAnswers, setClarifyingAnswers] = useState({});
   const [journey, setJourney] = useState("idle");
   const [progressItems, setProgressItems] = useState(defaultProgress);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [panelError, setPanelError] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const pollingRef = useRef(null);
 
@@ -147,31 +116,73 @@ function App() {
     }
   }
 
-  function updateForm(field, value) {
-    setFormData((current) => ({ ...current, [field]: value }));
+  function updateSearchQuery(value) {
+    setSearchQuery(value);
+    setClarifyingQuestions([]);
+    setClarifyingAnswers({});
+    setPanelError("");
   }
 
-  function buildRequest() {
-    return {
-      car_type: formData.carType,
-      budget_min: numberOrNull(formData.budgetMin),
-      budget_max: numberOrNull(formData.budgetMax),
-      year_min: numberOrNull(formData.yearMin),
-      year_max: numberOrNull(formData.yearMax),
-      mileage_max: numberOrNull(formData.mileageMax),
-      must_have_features: selectedFeatures,
-      condition: formData.condition || null,
-    };
+  function updateClarifyingAnswer(id, value) {
+    setClarifyingAnswers((current) => ({ ...current, [id]: value }));
+    setPanelError("");
   }
 
-  function validateRequest(request) {
-    if (!request.car_type || request.budget_min == null || request.budget_max == null) {
-      return "Choose a body style and budget range before searching.";
+  function buildInterpretQuery() {
+    const answers = clarifyingQuestions
+      .map((question) => {
+        const answer = (clarifyingAnswers[question.id] || "").trim();
+        return answer ? `${question.question} ${answer}` : "";
+      })
+      .filter(Boolean);
+
+    if (!answers.length) return searchQuery.trim();
+    return `${searchQuery.trim()}\n\nClarifying answers:\n${answers.join("\n")}`;
+  }
+
+  function unansweredRequiredQuestions() {
+    return clarifyingQuestions.filter((question) => !(clarifyingAnswers[question.id] || "").trim());
+  }
+
+  async function resolveSearchRequest() {
+    if (!searchQuery.trim()) {
+      setPanelError("Describe what you need before searching.");
+      return null;
     }
-    if (request.budget_min > request.budget_max) {
-      return "Budget minimum must be below the maximum.";
+
+    if (unansweredRequiredQuestions().length > 0) {
+      setPanelError("Answer the required questions before searching.");
+      return null;
     }
-    return "";
+
+    const response = await fetch("/search/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: buildInterpretQuery() }),
+    });
+
+    if (!response.ok) {
+      const details = await response.json().catch(() => ({}));
+      throw new Error(details.detail || `Search interpretation failed with HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.status === "needs_clarification") {
+      setClarifyingQuestions(data.questions || []);
+      setClarifyingAnswers({});
+      setPanelError("");
+      setJourney("idle");
+      return null;
+    }
+
+    if (!data.search_params) {
+      throw new Error("The search brief could not be structured.");
+    }
+
+    setClarifyingQuestions([]);
+    setClarifyingAnswers({});
+    setPanelError("");
+    return data.search_params;
   }
 
   function revealJourney() {
@@ -182,21 +193,17 @@ function App() {
 
   async function submitSearch(event) {
     event?.preventDefault();
-    const request = buildRequest();
-    const validation = validateRequest(request);
-    if (validation) {
-      setError(validation);
-      setJourney("error");
-      revealJourney();
-      return;
-    }
-
+    stopPolling();
     setIsSearching(true);
     setError("");
+    setPanelError("");
     setResult(null);
-    setProgressItems(defaultProgress);
 
     try {
+      const request = await resolveSearchRequest();
+      if (!request) return;
+
+      setProgressItems(defaultProgress);
       const response = await fetch("/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -222,22 +229,17 @@ function App() {
   }
 
   async function submitDemo() {
-    const request = buildRequest();
-    const validation = validateRequest(request);
-    if (validation) {
-      setError(validation);
-      setJourney("error");
-      revealJourney();
-      return;
-    }
-
     stopPolling();
     setIsSearching(true);
     setError("");
+    setPanelError("");
     setResult(null);
-    setProgressItems(defaultProgress.map((item) => ({ ...item, status: "done" })));
 
     try {
+      const request = await resolveSearchRequest();
+      if (!request) return;
+
+      setProgressItems(defaultProgress.map((item) => ({ ...item, status: "done" })));
       const response = await fetch("/search/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -295,6 +297,9 @@ function App() {
     setJourney("idle");
     setResult(null);
     setError("");
+    setPanelError("");
+    setClarifyingQuestions([]);
+    setClarifyingAnswers({});
     setProgressItems(defaultProgress);
     requestAnimationFrame(() => {
       document.getElementById("top")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -309,13 +314,15 @@ function App() {
       "main",
       { id: "top" },
       h(HeroSection, {
-        formData,
-        selectedFeatures,
+        searchQuery,
+        clarifyingQuestions,
+        clarifyingAnswers,
+        panelError,
         isSearching,
         onSubmit: submitSearch,
         onDemo: submitDemo,
-        onFormChange: updateForm,
-        onFeatureToggle: setSelectedFeatures,
+        onQueryChange: updateSearchQuery,
+        onClarifyingAnswerChange: updateClarifyingAnswer,
       }),
       h(BrandMarquee),
       h(ProofSection),
@@ -438,42 +445,36 @@ function HeroSection(props) {
 }
 
 function SearchPanel({
-  formData,
-  selectedFeatures,
+  searchQuery,
+  clarifyingQuestions,
+  clarifyingAnswers,
+  panelError,
   isSearching,
   onSubmit,
   onDemo,
-  onFormChange,
-  onFeatureToggle,
+  onQueryChange,
+  onClarifyingAnswerChange,
 }) {
   const presets = [
     {
       label: "Family SUV",
-      data: { carType: "SUV", budgetMin: "18000", budgetMax: "36000", yearMin: "2019", mileageMax: "70000" },
-      features: ["Backup Camera", "Apple CarPlay", "Blind Spot Monitor", "4WD/AWD"],
+      query: "I need a family SUV between $18k and $36k, 2019 or newer, under 70k miles, with backup camera, Apple CarPlay, blind spot monitor, and AWD.",
     },
     {
       label: "Commute sedan",
-      data: { carType: "Sedan", budgetMin: "12000", budgetMax: "26000", yearMin: "2018", mileageMax: "80000" },
-      features: ["Bluetooth", "Backup Camera", "Apple CarPlay"],
+      query: "I need a commute sedan between $12k and $26k, 2018 or newer, under 80k miles, with Bluetooth, backup camera, and Apple CarPlay.",
     },
     {
       label: "Weekend truck",
-      data: { carType: "Truck", budgetMin: "22000", budgetMax: "45000", yearMin: "2017", mileageMax: "90000" },
-      features: ["Backup Camera", "4WD/AWD", "Remote Start"],
+      query: "I need a weekend truck between $22k and $45k, 2017 or newer, under 90k miles, with backup camera, AWD or 4WD, and remote start.",
     },
   ];
 
   function applyPreset(preset) {
-    Object.entries(preset.data).forEach(([field, value]) => onFormChange(field, value));
-    onFeatureToggle(preset.features);
+    onQueryChange(preset.query);
   }
 
-  function toggleFeature(feature) {
-    onFeatureToggle((current) =>
-      current.includes(feature) ? current.filter((item) => item !== feature) : [...current, feature],
-    );
-  }
+  const submitLabel = clarifyingQuestions.length ? "Continue search" : "Search live inventory";
 
   return h(
     motion.form,
@@ -504,83 +505,45 @@ function SearchPanel({
       ),
     ),
     h(
-      "div",
-      { className: "form-grid" },
-      h(SelectField, {
-        id: "car-type",
-        label: "Body style",
-        value: formData.carType,
-        required: true,
-        options: carTypes,
-        placeholder: "Choose style",
-        onChange: (value) => onFormChange("carType", value),
-      }),
-      h(SelectField, {
-        id: "condition",
-        label: "Condition",
-        value: formData.condition,
-        options: conditions,
-        placeholder: "Any condition",
-        onChange: (value) => onFormChange("condition", value),
-      }),
-      h(NumberField, {
-        id: "budget-min",
-        label: "Budget min",
-        value: formData.budgetMin,
-        required: true,
-        min: 0,
-        step: 500,
-        onChange: (value) => onFormChange("budgetMin", value),
-      }),
-      h(NumberField, {
-        id: "budget-max",
-        label: "Budget max",
-        value: formData.budgetMax,
-        required: true,
-        min: 0,
-        step: 500,
-        onChange: (value) => onFormChange("budgetMax", value),
-      }),
-      h(NumberField, {
-        id: "year-min",
-        label: "Year from",
-        value: formData.yearMin,
-        min: 2000,
-        max: 2026,
-        onChange: (value) => onFormChange("yearMin", value),
-      }),
-      h(NumberField, {
-        id: "mileage-max",
-        label: "Max mileage",
-        value: formData.mileageMax,
-        min: 0,
-        step: 1000,
-        onChange: (value) => onFormChange("mileageMax", value),
+      "label",
+      { className: "field brief-field", htmlFor: "search-query" },
+      h("span", null, "Search brief"),
+      h("textarea", {
+        id: "search-query",
+        value: searchQuery,
+        rows: 5,
+        placeholder: "Reliable SUV under $35k, 2019 or newer, low miles, CarPlay, blind spot monitor...",
+        onChange: (event) => onQueryChange(event.target.value),
       }),
     ),
-    h(
-      "fieldset",
-      { className: "feature-fieldset" },
-      h("legend", null, "Must-have features"),
+    panelError && h("p", { className: "panel-error" }, panelError),
+    clarifyingQuestions.length > 0 &&
       h(
         "div",
-        { className: "feature-grid" },
-        features.map((feature) =>
-          h(
-            "button",
-            {
-              key: feature,
-              type: "button",
-              className: cls("feature-chip", selectedFeatures.includes(feature) && "is-active"),
-              onClick: () => toggleFeature(feature),
-              "aria-pressed": selectedFeatures.includes(feature),
-            },
-            selectedFeatures.includes(feature) ? icon(Check, "chip-check") : h("span", { className: "chip-dot" }),
-            h("span", null, feature),
+        { className: "clarification-box" },
+        h(
+          "div",
+          { className: "clarification-header" },
+          icon(Sparkles),
+          h("div", null, h("strong", null, "Required details"), h("span", null, "Needed before the inventory scan starts")),
+        ),
+        h(
+          "div",
+          { className: "clarification-grid" },
+          clarifyingQuestions.map((question) =>
+            h(
+              "label",
+              { className: "clarification-field", key: question.id, htmlFor: `question-${question.id}` },
+              h("span", null, question.question),
+              h("input", {
+                id: `question-${question.id}`,
+                value: clarifyingAnswers[question.id] || "",
+                onChange: (event) => onClarifyingAnswerChange(question.id, event.target.value),
+              }),
+            ),
           ),
         ),
       ),
-    ),
     h(
       "div",
       { className: "panel-actions" },
@@ -588,43 +551,10 @@ function SearchPanel({
         "button",
         { className: "btn btn-primary", type: "submit", disabled: isSearching },
         isSearching ? icon(LoaderCircle, "icon is-spinning") : icon(ScanSearch),
-        h("span", null, isSearching ? "Starting search" : "Search live inventory"),
+        h("span", null, isSearching ? "Analyzing brief" : submitLabel),
       ),
       h("button", { className: "btn btn-muted", type: "button", onClick: onDemo, disabled: isSearching }, icon(Trophy), h("span", null, "Use demo data")),
     ),
-  );
-}
-
-function SelectField({ id, label, value, options, placeholder, onChange, required }) {
-  return h(
-    "label",
-    { className: "field", htmlFor: id },
-    h("span", null, label),
-    h(
-      "select",
-      { id, value, required, onChange: (event) => onChange(event.target.value) },
-      h("option", { value: "" }, placeholder),
-      options.map((option) => h("option", { key: option, value: option }, option)),
-    ),
-  );
-}
-
-function NumberField({ id, label, value, onChange, min, max, step, required }) {
-  return h(
-    "label",
-    { className: "field", htmlFor: id },
-    h("span", null, label),
-    h("input", {
-      id,
-      type: "number",
-      value,
-      min,
-      max,
-      step,
-      required,
-      inputMode: "numeric",
-      onChange: (event) => onChange(event.target.value),
-    }),
   );
 }
 

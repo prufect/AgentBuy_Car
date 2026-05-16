@@ -532,7 +532,9 @@ img {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea,
+.clarification-field input {
   width: 100%;
   min-height: 46px;
   padding: 0 12px;
@@ -544,6 +546,14 @@ img {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
+.field textarea {
+  min-height: 136px;
+  padding: 12px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.45;
+}
+
 .field select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, #475569 50%), linear-gradient(135deg, #475569 50%, transparent 50%);
@@ -553,9 +563,67 @@ img {
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus,
+.clarification-field input:focus {
   border-color: rgba(220, 38, 38, 0.72);
   box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.1);
+}
+
+.panel-error {
+  margin: -4px 0 0;
+  color: var(--red-dark);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.clarification-box {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  border-radius: var(--radius);
+  background: #fff7f7;
+}
+
+.clarification-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clarification-header .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--red);
+}
+
+.clarification-header strong,
+.clarification-header span,
+.clarification-field span {
+  display: block;
+}
+
+.clarification-header strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.clarification-header span,
+.clarification-field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.clarification-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.clarification-field {
+  display: grid;
+  gap: 7px;
 }
 
 .feature-fieldset {
@@ -1078,7 +1146,7 @@ img {
 }
 
 .closing-cta {
-  padding: 26px 0 84px;
+  padding: 34px 0 108px;
 }
 
 .closing-inner {
@@ -1108,7 +1176,7 @@ img {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 28px 0 42px;
+  padding: 32px 0 max(76px, calc(48px + env(safe-area-inset-bottom)));
   color: var(--quiet);
   font-size: 0.92rem;
   font-weight: 700;
@@ -1265,6 +1333,10 @@ img {
 
   .content-section {
     padding: 58px 0;
+  }
+
+  .closing-cta {
+    padding-bottom: 118px;
   }
 
   .results-header,
