@@ -210,8 +210,46 @@ async def mock_search(req: SearchRequest):
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Debug endpoint — inspect what the scraper sees
 # ---------------------------------------------------------------------------
+
+@app.get("/debug/scrape")
+async def debug_scrape(url: str = "https://www.carvana.com/cars/suv?priceMin=20000&priceMax=35000"):
+    """Scrape a URL and return debug info about what was found."""
+    import os
+    from scraper import _fetch_via_brightdata, get_scrape_debug_info, _extract_json_vehicles, _parse_carmax_listings, _parse_carvana_listings
+
+    api_key = os.getenv("BRIGHTDATA_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="BRIGHTDATA_API_KEY not set")
+
+    html = await _fetch_via_brightdata(url, api_key)
+    if not html:
+        return {"error": "No HTML returned", "url": url}
+
+    debug = get_scrape_debug_info(html, "debug")
+
+    # Try JSON extraction
+    json_vehicles = _extract_json_vehicles(html)
+    debug["json_vehicles_found"] = len(json_vehicles)
+    debug["json_vehicles_sample"] = json_vehicles[:3]
+
+    # Try DOM parsing
+    if "carmax" in url.lower():
+        parsed = _parse_carmax_listings(html)
+    else:
+        parsed = _parse_carvana_listings(html)
+    debug["dom_listings_found"] = len(parsed)
+    debug["dom_listings_sample"] = [
+        {"title": c.title, "price": c.price, "year": c.year, "mileage": c.mileage, "url": c.url}
+        for c in parsed[:3]
+    ]
+
+    # Show a snippet of the raw HTML
+    debug["html_snippet"] = html[:2000]
+
+    return debug
+
 
 @app.get("/health")
 async def health():
