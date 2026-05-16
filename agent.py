@@ -4,7 +4,7 @@ AutoBrief Agent — Job runner + LLM summary generation.
 Orchestrates the full search flow:
   1. Scrape CarMax & Carvana in parallel via Bright Data
   2. Score all listings with the weighted engine
-  3. Generate AI summaries for top results via AgentField / TokenRouter
+  3. Generate AI summaries for top results via Qwen Cloud / TokenRouter
 """
 
 import asyncio
@@ -31,12 +31,15 @@ from scoring import score_cars
 logger = logging.getLogger(__name__)
 
 BRIGHTDATA_API_KEY = os.getenv("BRIGHTDATA_API_KEY", "")
-AGENTFIELD_API_KEY = os.getenv("AGENTFIELD_API_KEY", "")
-AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "https://api.agentfield.com/v1/chat/completions")
 
-# TokenRouter as fallback LLM
+# Primary LLM — Qwen Cloud (claim credits: https://tinyurl.com/qwencloudcredits)
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+QWEN_URL = os.getenv("QWEN_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+
+# Fallback LLM — TokenRouter (claim credits: https://tinyurl.com/tokenroutercredits)
 TOKENROUTER_API_KEY = os.getenv("TOKENROUTER_API_KEY", "")
 TOKENROUTER_URL = os.getenv("TOKENROUTER_URL", "https://api.tokenrouter.com/v1/chat/completions")
+
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen-plus")
 
 
@@ -74,14 +77,14 @@ Index starts at 1 matching the car numbering above."""
 
 
 async def _call_llm(prompt: str) -> Optional[str]:
-    """Try AgentField first, then TokenRouter as fallback."""
-    # Try AgentField
-    if AGENTFIELD_API_KEY:
-        result = await _call_agentfield(prompt)
+    """Try Qwen Cloud first, then TokenRouter as fallback."""
+    # Try Qwen Cloud (primary)
+    if QWEN_API_KEY:
+        result = await _call_qwen(prompt)
         if result:
             return result
 
-    # Try TokenRouter
+    # Try TokenRouter (fallback)
     if TOKENROUTER_API_KEY:
         result = await _call_tokenrouter(prompt)
         if result:
@@ -91,14 +94,14 @@ async def _call_llm(prompt: str) -> Optional[str]:
     return None
 
 
-async def _call_agentfield(prompt: str) -> Optional[str]:
-    """Call AgentField's chat completions endpoint."""
+async def _call_qwen(prompt: str) -> Optional[str]:
+    """Call Qwen Cloud (DashScope) chat completions endpoint."""
     async with httpx.AsyncClient(timeout=90.0) as client:
         try:
             resp = await client.post(
-                AGENTFIELD_URL,
+                QWEN_URL,
                 headers={
-                    "Authorization": f"Bearer {AGENTFIELD_API_KEY}",
+                    "Authorization": f"Bearer {QWEN_API_KEY}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -113,16 +116,16 @@ async def _call_agentfield(prompt: str) -> Optional[str]:
                 choices = data.get("choices")
                 if choices:
                     return choices[0].get("message", {}).get("content")
-                return data.get("content") or data.get("response") or data.get("text")
-            logger.warning("AgentField %s: %s", resp.status_code, resp.text[:300])
+                return data.get("output", {}).get("text")
+            logger.warning("Qwen %s: %s", resp.status_code, resp.text[:300])
             return None
         except Exception as exc:
-            logger.error("AgentField error: %s", exc)
+            logger.error("Qwen error: %s", exc)
             return None
 
 
 async def _call_tokenrouter(prompt: str) -> Optional[str]:
-    """Call TokenRouter's chat completions endpoint."""
+    """Call TokenRouter chat completions endpoint."""
     async with httpx.AsyncClient(timeout=90.0) as client:
         try:
             resp = await client.post(
@@ -253,7 +256,7 @@ async def run_search_job(
         # ── Step 3: Generate AI summaries for top cars ──────────────────
         top_cars = scored_cars[:5]  # Summarize top 5
 
-        if top_cars and (AGENTFIELD_API_KEY or TOKENROUTER_API_KEY):
+        if top_cars and (QWEN_API_KEY or TOKENROUTER_API_KEY):
             state.progress = "Generating AI summaries..."
             state.progress_detail["generating_summaries"] = SearchProgress(
                 step="generating_summaries", status="running"
