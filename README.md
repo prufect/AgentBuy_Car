@@ -4,11 +4,12 @@ AutoBrief scrapes live listings from CarMax and Carvana, scores every car across
 
 ## How it works
 
-1. You fill out a search form (car type, budget, year range, mileage, must-have features)
-2. The backend scrapes CarMax and Carvana in parallel via Bright Data Web Unlocker
-3. Every listing is scored 0–100 across six factors (price value, year, mileage, condition, features, source trust)
-4. The top 5 results are sent to an LLM that writes a 2-sentence value proposition for each car
-5. Results are returned ranked by composite score with a full score breakdown per car
+1. You describe the car you want in plain English
+2. The LLM structures the brief into search parameters, asking only for missing required details
+3. The backend scrapes CarMax and Carvana in parallel via Bright Data Web Unlocker
+4. Every listing is scored 0–100 across six factors (price value, year, mileage, condition, features, source trust)
+5. The top 5 results are sent to an LLM that writes a 2-sentence value proposition for each car
+6. Results are returned ranked by composite score with a full score breakdown per car
 
 ## Tech stack
 
@@ -89,6 +90,7 @@ docker run -p 8000:8000 --env-file .env autobrief
 
 | Endpoint | Method | Description |
 |---|---|---|
+| `/search/interpret` | POST | Convert a natural-language brief into search params or required questions |
 | `/search` | POST | Start a search job; returns `job_id` |
 | `/search/{job_id}` | GET | Poll job status and results |
 | `/search/test` | POST | Mock endpoint with hardcoded results (dev mode) |

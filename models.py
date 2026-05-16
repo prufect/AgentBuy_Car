@@ -4,7 +4,7 @@ All team members code against these interfaces.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from enum import Enum
 
 
@@ -41,6 +41,24 @@ class SearchRequest(BaseModel):
         None,
         description="Preferred condition: Clean, Like New, Excellent, Good, Fair",
     )
+
+
+class SearchInterpretRequest(BaseModel):
+    query: str = Field(..., description="Natural-language car search brief")
+
+
+class SearchClarifyingQuestion(BaseModel):
+    id: str = Field(..., description="Stable question id for the frontend")
+    question: str = Field(..., description="Question to ask before searching")
+    field: str = Field(..., description="SearchRequest field this question fills")
+
+
+class SearchInterpretResponse(BaseModel):
+    status: Literal["ready", "needs_clarification"]
+    search_params: Optional[SearchRequest] = None
+    questions: list[SearchClarifyingQuestion] = Field(default_factory=list)
+    summary: Optional[str] = Field(None, description="Short readable description of the interpreted search")
+    source: Optional[str] = Field(None, description="Interpretation source: llm or local")
 
 
 # ---------------------------------------------------------------------------
