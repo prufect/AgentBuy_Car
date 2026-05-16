@@ -869,10 +869,18 @@ function FeatureSection() {
         h(
           Reveal,
           { as: "article", className: "workflow-card", delay: index * 0.08, key: item.title },
-          h("span", { className: "workflow-index" }, `0${index + 1}`),
-          h("div", { className: "workflow-icon" }, icon(item.icon)),
-          h("h3", null, item.title),
-          h("p", null, item.text),
+          h(
+            "div",
+            { className: "workflow-card-head" },
+            h("span", { className: "workflow-index" }, `0${index + 1}`),
+            h("div", { className: "workflow-icon" }, icon(item.icon)),
+          ),
+          h(
+            "div",
+            { className: "workflow-card-body" },
+            h("h3", null, item.title),
+            h("p", null, item.text),
+          ),
         ),
       ),
     ),
