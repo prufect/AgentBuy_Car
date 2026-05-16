@@ -1,4 +1,4 @@
-# AutoBrief — AI-Powered Car Buying Advisor
+# AutoBrief: AI-Powered Car Buying Advisor
 
 AutoBrief scrapes live listings from CarMax and Carvana, scores every car across six weighted factors, and generates AI-written summaries explaining why each car fits your budget and preferences.
 
